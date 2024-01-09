@@ -1,0 +1,128 @@
+---
+title: "POP-INf Simulation: Mean Estimations"
+params:
+  output_path: "./results/mean/"
+output: html_document
+---
+
+## Load packages
+```{r}
+require(data.table)
+library(randomForest)
+library(tidyverse)
+library(doParallel)
+library(MASS)
+source("Fun.R")
+
+if(!dir.exists(params$output_path)) {
+  dir.create(params$output_path, recursive = TRUE)
+}
+```
+
+# Simulations for mean estimations
+```{r}
+r_vec <- seq(0, 1, by = 0.2)
+sigma_Y <- sqrt(5) # Variance of Y
+n_train <- 500 # Sample size of training data
+n_lab <- 100 # Sample size of labeled data
+n_unlab <- 20 * n_lab # Sample size of unlabeled data
+
+sim.times <- 1000 # Number of simulations per r
+
+configs <- expand.grid(
+  r = r_vec,
+  n_unlab = c(5000, 10000),
+  sigma_Y = c(sqrt(5))
+) %>%
+  as.data.frame() %>%
+  rownames_to_column("job")
+
+for (i in 1:nrow(configs)){
+  cat("i = ", i, "\n")
+  # Extract configurations
+  sigma_Y <- configs[i, "sigma_Y"] # Variance of Y
+  n_unlab <- configs[i, "n_unlab"] # Sample size of labeled data
+  n_lab <- n_unlab / 20 # Sample size of unlabeled data
+  r <- configs[i, "r"]
+  
+  set.seed(2023)
+  cl <- makeCluster(detectCores())
+  registerDoParallel(cl)
+  result <- foreach(
+    i = 1:sim.times, .combine = rbind, .packages = c("doParallel", "MASS", "randomForest"),
+    .errorhandling = "pass"
+  ) %dopar% {
+    
+    ## Data generation ####
+    mu <- c(0, 0)
+    Sigma <- matrix(c(1, 0, 0, 1), 2, 2)
+    n_data <- n_unlab + n_lab + n_train
+    data <- as.data.frame(mvrnorm(n_data, mu, Sigma))
+    colnames(data) <- c("X1", "X2")
+    beta_1 <- beta_2 <- r * sigma_Y / sqrt(2 * 3)
+    data$epsilon <- rnorm(n_data, 0 , sqrt(1 - r ^ 2)) * sigma_Y
+    data$Y <- data$X1 * beta_1 + data$X2 * beta_2 + data$X1 * data$X2 * beta_1 + data$X1^2 * beta_1 +  data$X2^2 * beta_1 + data$epsilon
+    true_mean <- mean(data$Y)
+
+    # Split the data 
+    train_data <- data[1:n_train, ]
+    lab_data <- data[(n_train + 1):(n_lab + n_train), ]
+    unlab_data <- data[(n_lab + n_train + 1):n_data, ]
+
+    # Fit the machine learning model
+    train_fit <- randomForest(Y ~ X1 + X2, data = train_data)
+    lab_data$Y_hat <- predict(train_fit, newdata = lab_data)
+    unlab_data$Y_hat <- predict(train_fit, newdata = unlab_data)
+    mse_f <- mean((unlab_data$Y - unlab_data$Y_hat) ^ 2)
+    
+    ## Constructing estimators ####
+    # Classic
+    classic <- classic_mean_asymptotic(Y_labeled = lab_data$Y, Yhat_labeled = lab_data$Y_hat, Yhat_unlabeled = unlab_data$Y_hat, alpha = 0.05)
+    classic_width <- classic$upper - classic$lower
+    classic_coverage <- (true_mean < classic$upper & true_mean > classic$lower)
+    classic_bias <- classic$theta - true_mean
+    
+    # PP
+    pp <- pp_mean_asymptotic(Y_labeled = lab_data$Y, Yhat_labeled = lab_data$Y_hat, Yhat_unlabeled = unlab_data$Y_hat, alpha = 0.05)
+    pp_width <- pp$upper - pp$lower
+    pp_coverage <- (true_mean < pp$upper & true_mean > pp$lower)
+    pp_bias <- pp$theta - true_mean
+    
+    # PopInf
+    PopInf <- PopInf_mean_asymptotic(Y_labeled = lab_data$Y, Yhat_labeled = lab_data$Y_hat, Yhat_unlabeled = unlab_data$Y_hat, alpha = 0.05)
+    PopInf_width <- PopInf$upper - PopInf$lower
+    PopInf_coverage <- (true_mean < PopInf$upper & true_mean > PopInf$lower)
+    PopInf_bias <- PopInf$theta - true_mean
+    
+    # EIF-based
+    eff <- eff_mean_asymptotic(Y_labeled = lab_data$Y, 
+                                Yhat_labeled = lab_data$Y_hat, 
+                                Yhat_unlabeled = unlab_data$Y_hat, 
+                                alpha = 0.05)
+    eff_width <- eff$upper - eff$lower
+    eff_coverage <- ((true_mean < eff$upper) & (true_mean > eff$lower))
+    eff_bias <- eff$theta - true_mean
+    
+    ## Summarizing output ####
+    out <- c(classic_width, classic_coverage, classic_bias,
+             pp_width, pp_coverage, pp_bias,
+             PopInf_width,  PopInf_coverage, PopInf_bias,
+             eff_width, eff_coverage, eff_bias,
+             PopInf$w,
+             r = cor(lab_data$Y_hat, lab_data$Y),
+             mse_f = mse_f)
+    names(out) <- c("classic_width", "classic_coverage", "classic_bias",
+                    "pp_width", "pp_coverage", "pp_bias",
+                    "PopInf_width",  "PopInf_coverage", "PopInf_bias",
+                    "eff_width", "eff_coverage", "eff_bias",
+                    "w", "r", "mse_f")
+    out
+  }
+  stopCluster(cl)
+  fwrite(as.data.frame(result), paste0(params$output_path, "mean",
+                                       "_N", n_unlab,
+                                       "_S", round(sigma_Y ^ 2),
+                                       ".r", r, ".txt.gz"),
+  sep = "\t", quote = F, row.names = F, col.names = T)
+}
+```

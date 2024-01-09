@@ -1,0 +1,120 @@
+---
+title: "POP-INf Simulation: OLS coefficient Estimation"
+params:
+  output_path: "./results/ols/"
+output: html_document
+---
+
+## Load packages
+```{r}
+require(data.table)
+library(randomForest)
+library(tidyverse)
+library(doParallel)
+library(MASS)
+source("Fun.R")
+
+if(!dir.exists(params$output_path)) {
+  dir.create(params$output_path, recursive = TRUE)
+}
+```
+
+# Simulations for OLS estimations
+```{r}
+n_train <- 500
+sim.times <- 1000
+
+configs <- expand.grid(
+  r = seq(0, 1, by = 0.2),
+  n_unlab = c(5000, 10000), 
+  sigma_Y = c(sqrt(5))
+) %>%
+  as.data.frame() %>%
+  rownames_to_column("job")
+
+for (i in 1:nrow(configs)){
+  # Extract configurations
+  sigma_Y <- configs[i, "sigma_Y"] # Variance of Y
+  n_unlab <- configs[i, "n_unlab"] # Sample size of labeled data
+  n_lab <- n_unlab / 20 # Sample size of unlabeled data
+  r <- configs[i, "r"]
+  
+  set.seed(2023)
+  cl <- makeCluster(detectCores())
+  registerDoParallel(cl)
+  result <- foreach(
+    i = 1:sim.times, .combine = rbind, .packages = c("doParallel", "MASS", "randomForest"),
+    .errorhandling = "pass"
+  ) %dopar% {
+    
+    # Data generation ####
+    mu <- c(0, 0)  # Mean vector
+    Sigma <- matrix(c(1, 0, 0, 1), 2, 2)  # Covariance matrix
+    n_data <- n_unlab + n_lab + n_train
+    data <- as.data.frame(mvrnorm(n_data, mu, Sigma))
+    colnames(data) <- c("X1", "X2")
+    beta_1 <- beta_2 <- r * sigma_Y / sqrt(2 * 3)
+    data$epsilon <- rnorm(n_data, 0 , sqrt(1 - r^2)) * sigma_Y
+    data$Y <- data$X1 * beta_1 + data$X2 * beta_2 + data$X1^2 * beta_1 +  data$X2^2 * beta_1 + data$epsilon
+    true_ols <- ols(data$X1, data$Y)
+    
+    ## Split the data ####
+    train_data <- data[1:n_train, ]
+    lab_data <- data[(n_train + 1):(n_lab + n_train), ]
+    unlab_data <- data[(n_lab + n_train + 1):n_data, ]
+    
+    # Fit the machine learning model
+    train_fit <- randomForest(Y ~ X1 + X2, data = train_data)
+    lab_data$Y_hat <- predict(train_fit, newdata = lab_data)
+    unlab_data$Y_hat <- predict(train_fit, newdata = unlab_data)
+    mse_f <- mean((unlab_data$Y - unlab_data$Y_hat) ^ 2)
+    
+    # Classic
+    classic <- classic_ols_asymptotic(X = lab_data$X1, Y = lab_data$Y, alpha = 0.05)
+    classic_width <- classic$upper_ci - classic$lower_ci
+    classic_coverage <- (true_ols < classic$upper_ci & true_ols > classic$lower_ci)
+    classic_bias <- classic$theta - true_ols
+    
+    # PP
+    pp <- pp_ols_asymptotic(X_labeled = lab_data$X1, X_unlabeled = unlab_data$X1, Y_labeled = lab_data$Y, Yhat_labeled = lab_data$Y_hat, Yhat_unlabeled = unlab_data$Y_hat, alpha = 0.05)
+    pp_width <- pp$upper_ci - pp$lower_ci
+    pp_coverage <- (true_ols < pp$upper_ci & true_ols > pp$lower_ci)
+    pp_bias <- pp$theta - true_ols
+    
+    # PopInf
+    PopInf <- PopInf_ols_asymptotic(X_labeled = lab_data$X1, X_unlabeled = unlab_data$X1, Y_labeled = lab_data$Y, Yhat_labeled = lab_data$Y_hat, Yhat_unlabeled = unlab_data$Y_hat, alpha = 0.05)
+    PopInf_width <- PopInf$upper_ci - PopInf$lower_ci
+    PopInf_coverage <- (true_ols < PopInf$upper_ci & true_ols > PopInf$lower_ci)
+    PopInf_bias <- PopInf$theta - true_ols
+    
+    # EIF-based
+    eff <- eff_ols_asymptotic(X_labeled = lab_data$X1, X_unlabeled = unlab_data$X1, Y_labeled = lab_data$Y, Yhat_labeled = lab_data$Y_hat, Yhat_unlabeled = unlab_data$Y_hat, alpha = 0.05)
+    eff_width <- eff$upper_ci - eff$lower_ci
+    eff_coverage <- (true_ols < eff$upper_ci & true_ols > eff$lower_ci)
+    eff_bias <- eff$theta - true_ols
+    
+    out <- c(classic_width, classic_coverage, classic_bias,
+             pp_width, pp_coverage, pp_bias,
+             PopInf_width,  PopInf_coverage, PopInf_bias,
+             eff_width, eff_coverage, eff_bias,
+             PopInf$w,
+             r = cor(lab_data$Y_hat, lab_data$Y),
+             mse_f = mse_f)
+    names(out) <- c("classic_width", "classic_coverage", "classic_bias",
+                    "pp_width", "pp_coverage", "pp_bias",
+                    "PopInf_width",  "PopInf_coverage", "PopInf_bias",
+                    "eff_width", "eff_coverage", "eff_bias",
+                    "w", "r", "mse_f")
+    out
+  }
+  stopCluster(cl)
+  
+  fwrite(as.data.frame(result), 
+         paste0(params$output_path, "ols",
+                "_N", n_unlab,
+                "_S", round(sigma_Y ^ 2),
+                ".r", r, ".txt.gz"),
+         sep = "\t", quote = FALSE, row.names = FALSE, col.names = TRUE)
+}
+```
+

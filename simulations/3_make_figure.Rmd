@@ -1,0 +1,224 @@
+---
+title: "POP-INf Simulation: Visualizations"
+params:
+  output_path: "./results/"
+  fig_path: "./figure/"
+output: html_document
+---
+
+# 0. Load packages and data
+```{r,message=FALSE}
+library(tidyverse)
+library(patchwork)
+
+if(!dir.exists(params$fig_path)) {dir.create(params$fig_path, recursive = TRUE)}
+
+mean_df_bias <- read.csv(file = paste0(params$output_path, "mean_df_bias.csv")) %>%
+  mutate(problem = "Outcome Mean",
+          method = recode_factor(
+           method,
+           PopInf = "POP-Inf",
+           eff = "EIF*-based",
+           pp = "PP",
+           classic = "Classic",
+         ))
+
+mean_df_plot <- read.csv(file = paste0(params$output_path, "mean_df_plot.csv")) %>%
+  mutate(problem = "Outcome Mean",
+         method = recode_factor(
+           method,
+           EIF = "EIF*-based",
+           PopInf = "POP-Inf"
+         ),
+         method = factor(method,
+                         levels = c("POP-Inf", "EIF*-based", "PP", "Classic")),
+         )
+
+ols_df_bias <- read.csv(file = paste0(params$output_path, "ols_df_bias.csv"))  %>%
+  mutate(problem = "OLS Coefficients",
+          method = recode_factor(
+           method,
+           PopInf = "POP-Inf",
+           eff = "EIF*-based",
+           pp = "PP",
+           classic = "Classic",
+         ))
+ols_df_plot <- read.csv(file = paste0(params$output_path, "ols_df_plot.csv"))  %>%
+  mutate(problem = "OLS Coefficients",
+         method = recode_factor(
+           method,
+           EIF = "EIF*-based",
+           PopInf = "POP-Inf"
+         ),
+         method = factor(method,
+                         levels = c("POP-Inf", "EIF*-based", "PP", "Classic"))
+         )
+
+```
+
+
+```{r}
+myscale_color <- function(...){
+      ggplot2::discrete_scale(
+        "colour", "my",
+        scales::manual_pal(
+          values = c(
+            "#ef3b2c","#984ea3","#7fc97f","#fdb462",
+            "#662506","#a6cee3",
+            "#fb9a99","#000099","#ffff33","#386cb0")),
+        ...)
+}
+```
+
+
+# Figure 1 (left): relative efficiency curve with low `r`
+```{r}
+gg_re_lowr <- rbind(mean_df_plot, ols_df_plot) %>%
+  filter(name == "RE",
+         r %in% seq(0, 0.5, by = 0.02),
+         N == 5000,
+         ) %>%
+  ggplot(aes(x = r, y = value, color = method)) +
+  geom_line(linewidth = .6) +
+  geom_hline(yintercept = 1, linetype = "dashed", color = "black", size = 0.5) +
+  facet_wrap(problem ~ ., nrow = 1) +
+  theme_bw() +
+   theme(strip.text = element_text(face = "bold", size = 12),
+        axis.title.y = element_text(size = 12),
+        legend.text = element_text(face = "bold", size = 11),
+        legend.title = element_text(size = 11)) +
+  labs(y = expression(paste(hat("SE"),"(method) /  ", hat("SE"), "(classic)"
+                            , sep = "")
+                      ),
+       x =  expression(gamma)
+       ) +
+  myscale_color()
+```
+
+
+# Figure 1 (right): coverage rate
+```{r}
+gg_rate <- rbind(mean_df_plot, ols_df_plot) %>%
+  filter(name == "coverage",
+         r %in% seq(0, 0.5, by = 0.02),
+         N == 5000,
+         ) %>%
+  ggplot(aes(x = r, y = value, color = method)) +
+  geom_hline(yintercept = 0.95, linetype = "dashed", color = "black", size = 0.5) +
+  geom_line(linewidth = 0.5) +
+  scale_y_continuous(limits = c(0.6, 1)) +
+  facet_wrap(problem ~ ., nrow = 1) +
+   theme_bw() +
+   theme(strip.text = element_text(face = "bold", size = 12),
+        axis.title.y = element_text(size = 12),
+        legend.position = "right",
+        legend.text = element_text(face = "bold", size = 11),
+        legend.title = element_text( size = 11)) +
+  labs(y = "Coverage Rate",
+       x = expression(gamma)
+       ) +
+  myscale_color()
+```
+
+Figure 1
+```{r}
+# horizontally arrange figures
+library(ggpubr)
+ggarrange(gg_rate, gg_re_lowr,ncol = 2, 
+          nrow = 1, common.legend = TRUE, legend="bottom"
+          )
+ggsave(filename = paste0(params$fig_path, "Fig1.png"), width = 8, height = 3)
+```
+
+
+
+# Figure 2: RE plot with high `r`
+```{r}
+gg_re_highr <- rbind(mean_df_plot, ols_df_plot) %>%
+  filter(name == "RE",
+         r %in% seq(0.5, 1, by = 0.02),
+         N == 5000,
+         ) %>%
+  ggplot(aes(x = r, y = value, color = method)) +
+  geom_line(linewidth = .6) +
+  geom_hline(yintercept = 1, linetype = "dashed", color = "black", size = 0.5) +
+  facet_wrap(problem ~ ., nrow = 1) +
+  theme_bw() +
+   theme(strip.text = element_text(face = "bold", size = 12),
+        axis.title.y = element_text(face = "bold", size = 12),
+        legend.position = "bottom",
+        legend.text = element_text(face = "bold", size = 11),
+        legend.title = element_text(size = 11)) +
+  labs(y = expression(paste(hat("SE"),"(method) /  ", hat("SE"), "(classic)"
+                            , sep = "")
+                      ),
+       x = expression(gamma)
+       ) +
+  myscale_color()
+
+ggsave(filename = paste0(params$fig_path, "Fig2.png"), width = 7, height = 4)
+```
+
+
+
+# Figure 4: coverage rate and relative efficiency when n = 5000
+```{r}
+gg_re500 <- rbind(mean_df_plot, ols_df_plot) %>%
+  filter(name == "RE",
+         N == 5000,
+         method != "Oracle"
+         ) %>%
+  ggplot(aes(x = r, y = value, color = method)) +
+  geom_line(linewidth = .6) +
+  geom_hline(yintercept = 1, linetype = "dashed", color = "black", size = 0.5) +
+  facet_wrap(problem ~ ., nrow = 1) +
+  theme_bw() +
+   theme(strip.text = element_text(face = "bold", size = 12),
+        axis.title.y = element_text(size = 12),
+        legend.position = "bottom",
+        legend.text = element_text(face = "bold", size = 11),
+        legend.title = element_text(size = 11)) +
+  labs(y = expression(paste(hat("SE"),"(method) /  ", hat("SE"), "(classic)"
+                            , sep = "")
+                      ),
+       x =  expression(gamma)
+       ) +
+  myscale_color()
+
+gg_re500
+ggsave(filename = paste0(params$fig_path, "Fig4.png"), width = 6, height = 3)
+```
+
+# Figure 5: bias box plot for PopInf 
+```{r}
+gg_bias <- mean_df_bias %>%
+  rbind(ols_df_bias) %>%
+  filter(r %in% seq(0, 1, by = 0.5),
+         N %in% c(5000, 10000),
+         method == "POP-Inf") %>%
+  mutate(n = N / 20,
+         r = as.factor(r),
+         n = as.factor(n)) %>%
+  ggplot(aes(x = r, y = bias, 
+             color = n,
+             group = interaction(r, n))) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "black", size = 0.5) +
+  geom_boxplot(outlier.shape = NA,
+                position=position_dodge(width = .9),
+                width = 0.7) +
+  facet_wrap(problem ~ ., nrow = 1) +
+  theme_bw() +
+  theme(strip.text = element_text(face = "bold", size = 12),
+        axis.title = element_text( size = 12),
+        legend.position = "bottom",
+        legend.text = element_text(size = 11),
+        legend.title = element_text(size = 11)) +
+  labs(y = "Bias", x = expression(gamma)) +
+  myscale_color()
+ggsave(filename = paste0(params$fig_path, "Fig5.png"), width = 7, height = 4)
+```
+
+
+
+
+

@@ -1,0 +1,79 @@
+---
+title: "POP-INf Simulation: Summarizing OLS Coefficient Estimation Results"
+params:
+  output_path: "./results/ols/"
+output: html_document
+---
+```{r}
+library(ggplot2)
+library(data.table)
+library(tidyverse)
+```
+
+```{r}
+output_files <- list.files(params$output_path)
+df_plot <- c()
+df_bias <- c()
+for (ff in output_files){
+    
+    tmp <- fread(paste0(params$output_path, ff))
+   
+    settings <- str_extract_all(ff, "[0-9]+") %>% unlist
+    N <- as.numeric(settings[1])
+    sigma_Y <- sqrt(as.numeric(settings[2]))
+    r <- str_sub(ff, str_locate(ff, ".r")[2] + 1, str_locate(ff, ".txt")[1] - 1) %>%
+      as.numeric()
+    
+    methods <- c("PopInf", "PP", "Classic", "EIF")
+    
+    df_tmp <- data.frame(
+        value = c(mean(tmp$PopInf_width / tmp$classic_width),
+                  mean(tmp$pp_width / tmp$classic_width),
+                  mean(tmp$eff_width / tmp$classic_width)),
+      # method = methods[1:4],
+    method = c("PopInf", "PP", "EIF"),
+      name = "RE"
+    ) %>%
+      rbind(
+        data.frame(
+          value = c(mean(tmp$PopInf_width),
+                     mean(tmp$pp_width),
+                     mean(tmp$classic_width),
+                     mean(tmp$eff_width)),
+          method = methods,
+          name = "Width"
+        )
+      ) %>%
+      rbind(data.frame(
+        value = c( sum(tmp$PopInf_coverage)/nrow(tmp),
+                    sum(tmp$pp_coverage)/nrow(tmp),
+                    sum(tmp$classic_coverage)/nrow(tmp),
+                    sum(tmp$eff_coverage)/nrow(tmp)
+                    ),
+        method = methods,
+        name = "coverage"
+      )) %>%
+      mutate(mse_f = mean(tmp$mse_f),
+             r = r,
+             N = N,
+             Sigma_Y = sigma_Y
+             )
+    df_plot <- rbind(df_tmp, df_plot)
+    
+    df_temp_bias <- data.frame(
+      tmp$PopInf_bias, tmp$pp_bias, tmp$classic_bias,
+      tmp$eff_bias
+    ) %>%
+      pivot_longer(everything(), names_to = "method", values_to = "bias") %>%
+      mutate(method = str_remove(method, "_bias"),
+             method = str_remove(method, "tmp."),
+             mse_f = mean(tmp$mse_f),
+             r = r,
+             N = N,
+             Sigma_Y = sigma_Y)
+    df_bias <- rbind(df_temp_bias, df_bias)
+}
+
+write.csv(df_bias, file = paste0(params$output_path, "../ols_df_bias.csv"), row.names = FALSE)
+write.csv(df_plot, file = paste0(params$output_path, "../ols_df_plot.csv"))
+```

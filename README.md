@@ -1,4 +1,4 @@
-# POP-Inf_analysis
+# PSPA_analysis
 
 This repository contains the analysis code for paper: [Assumption-lean and data-adaptive post-prediction inference](https://arxiv.org/abs/2311.14220).
 

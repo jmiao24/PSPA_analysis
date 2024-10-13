@@ -1,6 +1,6 @@
 # POP-Inf_analysis
 
-This repository contains the analysis code for POP-Inf paper: [Assumption-lean and data-adaptive post-prediction inference](https://arxiv.org/abs/2311.14220).
+This repository contains the analysis code for paper: [Assumption-lean and data-adaptive post-prediction inference](https://arxiv.org/abs/2311.14220).
 
 ## Simulations
 
@@ -23,7 +23,7 @@ There are five steps for the pipeline:
 
 ## Contact 
 
-Please submit an issue or contact Jiacheng (jiacheng.miao@wisc.edu) or Xinran (xinran.miao@wisc.edu) for questions.
+Please submit an issue or contact Jiacheng (jiacheng.miao@wisc.edu) for questions.
 
 ## Reference
 ```
